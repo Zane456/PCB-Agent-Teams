@@ -66,6 +66,8 @@ AGENTS.md
 
 # .claude/skills + references ARE the project core — commit them.
 # Deprecated skills live in _archive/archived_skills/ (already ignored above).
+# Per-machine Claude Code permissions — every user keeps their own.
+.claude/settings.local.json
 
 # External KiCad library clones (regenerate on demand, not in git)
 lib_cache/sources/

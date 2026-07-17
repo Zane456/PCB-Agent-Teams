@@ -12,7 +12,9 @@
 PCB-Agent-Teams/
 ├── README.md             ← this file
 ├── CLAUDE.md             ← routing table (injected every session)
-├── USER.md               ← user profile (hardware on hand / locale / skills / preferences)
+├── LICENSE.md            ← PolyForm Noncommercial 1.0.0
+├── USER.md.example       ← user-profile template (copy to USER.md)
+├── USER.md               ← your profile: hardware on hand / locale / skills / preferences (gitignored)
 ├── requirements.txt      ← Python dependencies
 ├── .claude/
 │   ├── skills/           ← 9 skills
