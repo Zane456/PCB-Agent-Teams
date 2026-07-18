@@ -28,6 +28,18 @@
 #                              probe_timeout_sec        单候选探测超时（默认 12s）
 #                              chain                    fallback_chain 的尝试顺序（list of strategy ids）
 #                              verify_command, verify_flag, full_flag  lcsc_easyeda 用
+#
+#   ── 引擎参数化键（全部可选；缺省 = 引擎内 JP 硬编码字面量，未写 = JP 行为不变）──
+#   gate_policy.min_local_sources   - buyable pass 所需 active 源数（JP=2；CN=1 单 LCSC 源即 pass）
+#   gate_policy.lifecycle_policy    - api（DK/Mouser 查 NRND）| unverified（无生命周期数据，每条结果标 lifecycle:"unverified"）
+#   local_vendor_ids                - 本土仓 vendor_id 列表（驱动 local-active 判定）
+#   lanes                           - vendor_id -> lane 标签（写进每条 vendor_result）
+#   fx_display                      - cny_jpy（LCSC 报价换算 JPY）| none（原币显示，不打汇率 API）
+#   discover_sources                - --discover 默认源顺序（local / digikey / lcsc / lcsc_parametric / jlcparts）
+#   lcsc_attributes_as_parameters   - "on"|"off"：jlcsearch attributes 是否归一化进 raw_parameters
+#   display                         - stdout 摘要渲染（lane_order / lane_labels / emit_lane_flags: jp|none /
+#                                     lcsc_only_note / footer_note / lifecycle_note）
+#   ⚠ 新键约束（load_yaml_simple 兼容）：禁行内注释、禁 boolean（用字符串）、禁 list-of-dicts
 
 locales:
 
@@ -63,6 +75,31 @@ locales:
       headed_first_run_only: true
       requires_oauth: true
       blocked_when_headless_no_session: true
+    # 引擎参数化键：以下值 = component_select.py 内原 JP 硬编码字面量（改值=改行为）
+    gate_policy:
+      min_local_sources: 2
+      lifecycle_policy: api
+    local_vendor_ids: [digikey_jp, mouser_jp, akizuki, marutsu, chip1stop, rs_jp]
+    lanes:
+      digikey_jp: jp_domestic
+      mouser_jp: jp_domestic
+      akizuki: jp_domestic
+      marutsu: jp_domestic
+      chip1stop: jp_domestic
+      rs_jp: jp_domestic
+      lcsc: jlcpcb_consolidated
+    fx_display: cny_jpy
+    discover_sources: [local, digikey, lcsc]
+    lcsc_attributes_as_parameters: "off"
+    display:
+      lane_order: [digikey_jp, mouser_jp, lcsc]
+      lane_labels:
+        digikey_jp: "🇯🇵 DK_JP (¥/在库)"
+        mouser_jp: "🇯🇵 Mouser_JP"
+        lcsc: "🇨🇳 LCSC (CNY ≈ JPY / 在库)"
+      emit_lane_flags: jp
+      lcsc_only_note: "⚠ {mpn}：本土仓未收录，仅 LCSC 有现货 — 走 JLCPCB 拼单（DHL ~5d 到日本）"
+      footer_note: "注：购买 URL / datasheet / fail 候选完整数据 → JSON。LCSC lane 走 JLCPCB 拼单（PCB+元件同 DHL）。"
     vendors_priority:
       - digikey_jp
       - mouser_jp
@@ -201,6 +238,27 @@ locales:
       verify_flag: "--verify-only"
       full_flag: "--full"
       probe_timeout_sec: 30
+    # 引擎参数化键（component-selecting-CN 零 key 链路）：
+    # 单 LCSC 源即 pass；无生命周期数据诚实标 unverified；不打汇率 API；
+    # discover 主走 jlcsearch 参数端点，电感/磁珠等缺失品类走 jlcparts 分片
+    gate_policy:
+      min_local_sources: 1
+      lifecycle_policy: unverified
+    local_vendor_ids: [lcsc, szlcsc, taobao]
+    lanes:
+      lcsc: cn_domestic
+      szlcsc: cn_domestic
+      taobao: cn_domestic_html
+    fx_display: none
+    discover_sources: [local, lcsc_parametric, lcsc, jlcparts]
+    lcsc_attributes_as_parameters: "on"
+    display:
+      lane_order: [lcsc]
+      lane_labels:
+        lcsc: "🇨🇳 LCSC (CNY/在库)"
+      emit_lane_flags: none
+      footer_note: "注：购买 URL / datasheet / fail 候选完整数据 → JSON。LCSC 直发或与 JLCPCB 打样合单。"
+      lifecycle_note: "注：LCSC 无 NRND/生命周期数据 —— 本表候选 lifecycle=unverified，关键件请自行核实在产状态。"
     vendors_priority:
       - lcsc
       - szlcsc

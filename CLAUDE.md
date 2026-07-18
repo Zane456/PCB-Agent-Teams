@@ -15,7 +15,7 @@ PCB-Agent-Teams/
 ├── .claude/
 │   ├── references/       ← 工作区级元协议（按需读）
 │   │   └── protocols.md  ← USER 维护 / 计划先行 / sub-agent 分工 / 监控 / Phase 编号
-│   └── skills/           ← 9 个正式 skill
+│   └── skills/           ← 10 个正式 skill
 └── Projects/<name>/      ← 项目骨架（用 project-init 生成）
 ```
 
@@ -26,6 +26,7 @@ PCB-Agent-Teams/
 | 用户在手硬件 / 焊接能力 / 所属地 / 偏好 | `USER.md` |
 | 跨项目电气铁律（电源域、差分链等） | `.claude/skills/circuit-design/references/electrical_invariants.md` |
 | 日本选品规则、JP 替代库表 | `.claude/skills/component-selecting-JP/references/jp_vendor_priority.md` |
+| 中国选品规则、国产替代表（零 key 链路） | `.claude/skills/component-selecting-CN/references/cn_vendor_priority.md` |
 | API rate limit / DK / Mouser | `.claude/skills/component-selecting-JP/references/api_rate_limits.md` |
 | BOM 三类文件生命周期 | `.claude/skills/component-preparing/references/bom_lifecycle.md` |
 | 工作区元协议（计划先行 / sub-agent 分工 / 监控） | `.claude/references/protocols.md` |
@@ -62,13 +63,13 @@ PCB-Agent-Teams/
 
 | USER.md §0 所属地 | 选品 skill | vendor 链路 | 状态 |
 | --- | --- | --- | --- |
-| 日本 | `component-selecting-JP` | DigiKey JP + Mouser JP（API + JPY） | ✅ 已实现（当前唯一） |
-| 中国大陆 | `component-selecting-CN` | LCSC（API） + EasyEDA library | ⛔ 未实现 |
+| 日本 | `component-selecting-JP` | DigiKey JP + Mouser JP + LCSC（API + JPY） | ✅ 已实现 |
+| 中国大陆 | `component-selecting-CN` | LCSC jlcsearch（免 key）+ jlcparts 分片 + EasyEDA library | ✅ 已实现（零 key） |
 | 美国 | `component-selecting-US` | DigiKey US + Mouser US（API + USD） | ⛔ 未实现 |
 | 其他 | （待建） | — | ⛔ 未实现 |
 
-**当前规则**：USER.md §0 = 日本 → 直接走 `component-selecting-JP`。
-USER.md §0 ≠ 日本时**不要静默 fallback**——告诉用户对应 locale 的 skill 还没实现，让 user 决定（手工选品 / 临时改 locale / 或先建对应 skill）。
+**当前规则**：USER.md §0 = 日本 → `component-selecting-JP`；= 中国大陆 → `component-selecting-CN`（零 key，共享引擎在 JP skill scripts/）。
+其余 locale **不要静默 fallback**——告诉用户对应 locale 的 skill 还没实现，让 user 决定（手工选品 / 临时改 locale / 或先建对应 skill）。
 
 > Phase 2.5 资产抓取（datasheet + library + evidence）由 `component-preparing` 接手，不在 component-selecting 范围。
 

@@ -1,8 +1,8 @@
 # PCB-Agent-Teams — KiCad PCB Workflow
 
-> A multi-project PCB design workspace orchestrated around KiCad 10. Nine skills drive a Phase 0–5 pipeline that covers the full chain, from topology discussion to Gerber shipout.
+> A multi-project PCB design workspace orchestrated around KiCad 10. Ten skills drive a Phase 0–5 pipeline that covers the full chain, from topology discussion to Gerber shipout.
 
-> **Recommended runtime — [Claude Code](https://claude.com/claude-code).** This workspace is driven by `CLAUDE.md` (a routing table Claude Code auto-loads every session) plus a team of nine skills under `.claude/skills/`. Both are Claude Code-native formats, so it discovers and orchestrates the agent team with zero config — `CLAUDE.md` routes each phase to the right skill. The skills follow the open `SKILL.md` standard, so other agents can read them too, but the automatic `CLAUDE.md` load and `.claude/skills/` discovery are what make Claude Code the natural driver.
+> **Recommended runtime — [Claude Code](https://claude.com/claude-code).** This workspace is driven by `CLAUDE.md` (a routing table Claude Code auto-loads every session) plus a team of ten skills under `.claude/skills/`. Both are Claude Code-native formats, so it discovers and orchestrates the agent team with zero config — `CLAUDE.md` routes each phase to the right skill. The skills follow the open `SKILL.md` standard, so other agents can read them too, but the automatic `CLAUDE.md` load and `.claude/skills/` discovery are what make Claude Code the natural driver.
 
 ---
 
@@ -18,7 +18,7 @@ PCB-Agent-Teams/
 ├── USER.md               ← your profile: hardware on hand / locale / skills / preferences (gitignored)
 ├── requirements.txt      ← Python dependencies
 ├── .claude/
-│   ├── skills/           ← 9 skills
+│   ├── skills/           ← 10 skills
 │   └── references/       ← workspace meta-protocols (protocols.md)
 ├── lib_external/         ← shared component library (starts empty; component-preparing vendors symbols/footprints/3D here)
 ├── lib_cache/sources/    ← read-only cache of external libs (pre-filter pool)
@@ -100,7 +100,7 @@ Each skill is a standalone toolbox, **not a mandatory pipeline**. At any stage y
 | 4.5 PCB check gate | `check-pcb` | EMC + thermal + parasitic SPICE + cross-ref analysis |
 | 5 Shipout | `release` | Gerber / CPL / production BOM + documentation PDF + fab decision + packaging |
 
-> **Locale routing**: `component-selecting` is a phase name; the concrete skill is chosen by `USER.md §0` locale. Currently **only `component-selecting-JP` is implemented** (DigiKey JP + Mouser JP); the CN and US variants are not yet built. When the locale ≠ Japan, do not silently fall back — tell the user the matching skill is missing.
+> **Locale routing**: `component-selecting` is a phase name; the concrete skill is chosen by `USER.md §0` locale. Two locales are implemented: **`component-selecting-JP`** (DigiKey JP + Mouser JP + LCSC, needs a free DigiKey key) and **`component-selecting-CN`** (LCSC jlcsearch + jlcparts data shards — **zero API keys**). The US variant is not yet built. For any other locale, do not silently fall back — tell the user the matching skill is missing.
 
 Any gate that fails: **roll back**, do not bypass. See the detailed Phase table in [CLAUDE.md](CLAUDE.md).
 
@@ -151,14 +151,17 @@ Details in [`component-preparing/references/bom_lifecycle.md`](.claude/skills/co
 
 ## First-time setup
 
-> **⚠ Not in Japan?** Phase 2 (component selection) is the only locale-bound stage: the shipped skill is `component-selecting-JP`, which prices in JPY against DigiKey JP / Mouser JP / LCSC-ships-to-Japan stock, and applies Japan-specific sourcing rules. Every other phase is locale-neutral and runs unchanged. To use this workspace outside Japan, set your locale in `USER.md §0`, then either **(a)** adapt `component-selecting-JP` into a variant for your region — swap the distributor endpoints / currency and the JP-specific rules in its `references/` — or **(b)** pick parts by hand and feed the list to `component-preparing`. The pipeline deliberately never falls back to the JP skill silently.
+> **⚠ Not in Japan?** Phase 2 (component selection) is the only locale-bound stage; every other phase is locale-neutral and runs unchanged. Set your locale in `USER.md §0`:
+> - **China mainland** — supported out of the box via `component-selecting-CN`: LCSC jlcsearch + jlcparts data shards, **no API keys at all** (lifecycle is honestly labeled `unverified` since LCSC carries no NRND data).
+> - **Japan** — the original `component-selecting-JP` (DigiKey JP + Mouser JP + LCSC; needs a free DigiKey key).
+> - **Anywhere else** — either **(a)** adapt one of the two shipped skills into a variant for your region (both are thin shells over a shared locale-driven engine — add a locale block to `locale_mapping.yaml` and mirror the CN skill's structure), or **(b)** pick parts by hand and feed the list to `component-preparing`. The pipeline deliberately never falls back to another locale's skill silently.
 
 ### Prerequisites
 
 - **macOS** with **[KiCad 10](https://www.kicad.org/download/)** installed — skills call `kicad-cli` and KiCad's bundled `pcbnew` Python API (no MCP). Default install is `/Applications/KiCad/KiCad.app`; if KiCad lives elsewhere, just make sure `kicad-cli` is on `PATH` (scripts auto-probe PATH / Homebrew / Snap / Flatpak). (`KICAD_ROOT` is unrelated — it overrides the *project workspace root*, not the KiCad install location.)
 - **Python 3.12** (3.13 / 3.14 are not supported).
 - **[ngspice](https://ngspice.sourceforge.io/)** on `PATH` — required for the SPICE checks in `check-schematic` / `check-pcb` (`brew install ngspice`).
-- API keys — at minimum a free [DigiKey developer](https://developer.digikey.com/) account. The demo sources parts for **Japan**; see [External APIs](#external-apis) for the full list of services and what each does.
+- API keys — **locale-dependent**: the **Japan** pipeline needs at minimum a free [DigiKey developer](https://developer.digikey.com/) account; the **China-mainland** pipeline needs **no keys at all**. See [External APIs](#external-apis) for the full list of services and what each does.
 
 > **Two things ship as source only — build or fetch them on demand:**
 > - The Rust grid router (`draw-pcb/.../rust_router/`) ships as Rust source; the compiled library is gitignored. Build it with `python3 build_router.py` in `draw-pcb/scripts/vendor/KiCadRoutingTools/` (needs a [Rust toolchain](https://rustup.rs/)) — only the optional auto-routing phase needs it.
@@ -187,7 +190,7 @@ cp USER.md.example USER.md
 
 ### Run
 
-- **Claude Code**: open this folder — the root `CLAUDE.md` loads automatically, and the nine skills under `.claude/skills/` are available via `/<skill-name>`.
+- **Claude Code**: open this folder — the root `CLAUDE.md` loads automatically, and the ten skills under `.claude/skills/` are available via `/<skill-name>`.
 - **Plain shell**: load the keys first with `set -a && source .env && set +a`, then run any skill script as `.venv/bin/python .claude/skills/<skill>/scripts/<script>.py`.
 
 ### Notes
@@ -200,7 +203,7 @@ cp USER.md.example USER.md
 
 ## External APIs
 
-> **The uploaded demo sources parts for the Japan region.** Component selection runs through `component-selecting-JP`, which queries **DigiKey JP + Mouser JP + LCSC as three equal, always-checked sources**. The keys below are what this Japan-region pipeline needs today; the CN / US locale variants are not yet built.
+> **The keys below only apply to the Japan pipeline** (`component-selecting-JP`, which queries DigiKey JP + Mouser JP + LCSC as three equal sources). The **China-mainland pipeline (`component-selecting-CN`) is fully key-free** — LCSC jlcsearch + jlcparts public data, nothing to sign up for. The US locale variant is not yet built.
 
 ### Distributor / sourcing APIs
 
@@ -212,7 +215,7 @@ cp USER.md.example USER.md
 | **LCSC / JLCPCB** | China warehouse that **ships to Japan** (parts can co-order with the JLCPCB fab run), so it stays a valid third source for the JP pipeline + KiCad library fetch via `easyeda2kicad` | — No key (public) | — | — |
 | **Firecrawl** | Datasheet web-scrape fallback when a distributor exposes no direct PDF | ○ Optional | `FIRECRAWL_API_KEY` | [firecrawl.dev](https://firecrawl.dev/) |
 
-All keys go in `.env` (copied from `.env.example`). DigiKey is the only hard requirement; everything else widens coverage or adds a feature. Set the optional DigiKey locale vars (`DIGIKEY_LOCALE_SITE=JP` etc.) if you want non-default region/currency.
+All keys go in `.env` (copied from `.env.example`). For the JP locale, DigiKey is the only hard requirement; everything else widens coverage or adds a feature. For the CN locale, skip this section entirely — no keys needed. Set the optional DigiKey locale vars (`DIGIKEY_LOCALE_SITE=JP` etc.) if you want non-default region/currency.
 
 ---
 
@@ -239,7 +242,8 @@ This workspace stands on excellent open-source work. Sincere thanks to these pro
 - **[kicad-sch-api](https://github.com/circuit-synth/kicad-sch-api)** — programmatic schematic editing (MPN property injection, post-processing).
 - **[easyeda2kicad](https://github.com/uPesy/easyeda2kicad.py)** — converts LCSC / EasyEDA parts into KiCad symbols / footprints / 3D models for `component-preparing`.
 - **[KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools)** by drandyhaas — the optional auto-routing phase, including its Rust grid router (MIT, vendored under `.claude/skills/draw-pcb/scripts/vendor/`).
-- **[jlcsearch](https://github.com/tscircuit/jlcsearch)** by tscircuit — the public LCSC search API used as the third sourcing channel.
+- **[jlcsearch](https://github.com/tscircuit/jlcsearch)** by tscircuit — the public LCSC search API: third sourcing channel for the JP pipeline, primary (and key-free) lane for the CN pipeline.
+- **[jlcparts](https://github.com/yaqwsx/jlcparts)** by yaqwsx — published parametric data shards of the JLC catalogue; powers the CN pipeline's offline parametric discovery for categories jlcsearch lacks (inductors, ferrite beads).
 - **[Playwright](https://playwright.dev/)** — headless-browser probing of distributor pages and datasheet fetching.
 - And the Python ecosystem this runs on: NumPy, SciPy, Shapely, Matplotlib, Pillow, ReportLab, odfpy, python-docx, Jinja2, Requests, PyYAML, psutil, pytest.
 

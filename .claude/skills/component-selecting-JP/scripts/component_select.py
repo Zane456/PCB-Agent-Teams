@@ -385,6 +385,18 @@ LANE_OF_VENDOR: dict[str, str] = {
     "mouser_de": "intl_direct",
 }
 
+
+def _local_vendor_ids(locale_block: dict[str, Any] | None) -> set[str]:
+    """Locale-driven local-vendor set; falls back to the JP constant so a
+    stale locale_mapping.yaml keeps today's behavior."""
+    ids = (locale_block or {}).get("local_vendor_ids")
+    return {str(v) for v in ids} if ids else set(JP_LOCAL_VENDOR_IDS)
+
+
+def _lane_of(vendor_id: str, locale_block: dict[str, Any] | None) -> str:
+    lanes = (locale_block or {}).get("lanes") or {}
+    return str(lanes.get(vendor_id) or LANE_OF_VENDOR.get(vendor_id, "unknown"))
+
 # Display labels for human-readable summary. Short and locale-flagged so the
 # 3-lane comparison fits on one line per vendor.
 VENDOR_DISPLAY: dict[str, tuple[str, str]] = {
@@ -951,17 +963,37 @@ def query_lcsc_api_for_vendor(
     datasheet_url = ds_block.get("pdf") or chosen.get("datasheet")
 
     # CNY → JPY conversion for cross-lane comparability with DK_JP / Mouser_JP.
-    # Always populated (rate has a hard fallback), so output_format can rely on
+    # Gated by locale fx_display (default cny_jpy = today's JP behavior). When
+    # populated the rate has a hard fallback, so output_format can rely on
     # `price_jpy_estimated` being present whenever `price` is. fx_source tells
-    # the renderer whether to add a ⚠ marker.
+    # the renderer whether to add a ⚠ marker. fx_display: none (native-CNY
+    # locales) skips the frankfurter call entirely; keys stay present as None.
     price_jpy_estimated: float | None = None
     fx_rate: float | None = None
     fx_source: str | None = None
-    if isinstance(price, (int, float)) and price > 0:
+    fx_mode = str((locale_block or {}).get("fx_display", "cny_jpy"))
+    if isinstance(price, (int, float)) and price > 0 and fx_mode == "cny_jpy":
         fx_rate, fx_source = _get_cny_jpy_rate()
         price_jpy_estimated = round(price * fx_rate, 2)
 
-    return {
+    # jlcsearch full=true attributes → raw_parameters, only for locales that
+    # opt in (lcsc_attributes_as_parameters: "on") — feeds _extract_key_params
+    # for LCSC-only candidates. Conservative normalizer: scalars kept, dict
+    # values contribute their first scalar slot, anything else dropped.
+    raw_parameters: dict[str, str] = {}
+    if str((locale_block or {}).get("lcsc_attributes_as_parameters", "off")) == "on":
+        attrs = extra.get("attributes")
+        if isinstance(attrs, dict):
+            for attr_key, attr_val in attrs.items():
+                if isinstance(attr_val, (str, int, float)) and str(attr_val).strip():
+                    raw_parameters[str(attr_key)] = str(attr_val)
+                elif isinstance(attr_val, dict):
+                    for slot in attr_val.values():
+                        if isinstance(slot, (str, int, float)) and str(slot).strip():
+                            raw_parameters[str(attr_key)] = str(slot)
+                            break
+
+    result = {
         **base,
         "status": cls,
         "reason": "lcsc_api_ok" if has_stock else "lcsc_api_no_stock",
@@ -979,6 +1011,9 @@ def query_lcsc_api_for_vendor(
         "datasheet_url": datasheet_url,
         "package": chosen.get("package") or extra.get("package"),
     }
+    if raw_parameters:
+        result["raw_parameters"] = raw_parameters
+    return result
 
 
 def now_iso() -> str:
@@ -1076,6 +1111,18 @@ def load_yaml_simple(path: Path) -> dict[str, Any]:
 
     parsed, _ = parse_block(0, 0)
     return parsed
+
+
+def _warn_caller_locale_mismatch(args: argparse.Namespace, locale_name: str) -> None:
+    """Mis-invocation hint: a locale thin shell driving a different locale is
+    almost always a USER.md §0 / --locale mistake. Warn, never fail."""
+    caller = getattr(args, "caller_skill", "component-selecting-JP")
+    if caller == "component-selecting-CN" and locale_name != "中国大陆":
+        print(
+            f"WARN caller-skill={caller} but resolved locale={locale_name}; "
+            "check USER.md §0 or pass --locale 中国大陆",
+            file=sys.stderr,
+        )
 
 
 def read_user_locale(user_md_path: Path) -> str | None:
@@ -1400,6 +1447,106 @@ def discover_lcsc_api(keywords: list[str], role: str | None, limit_per_keyword: 
                     "description": comp.get("description") or comp.get("desc") or "",
                 }
             )
+    return out, notes
+
+
+# jlcsearch parametric list endpoints (`/<category>/list.json`, key-free).
+# Deliberately partial: categories jlcsearch lacks (inductors / ferrite beads,
+# both 404 upstream) fall through to the jlcparts shard lane instead.
+JLCSEARCH_LIST_OF_ROLE: dict[str, str] = {
+    "resistor": "resistors",
+    "capacitor": "capacitors",
+    "led": "leds",
+    "diode": "diodes",
+    "ldo": "ldos",
+    "voltage_regulator": "voltage_regulators",
+    "mosfet": "mosfets",
+    "bjt": "bjt_transistors",
+    "fuse": "fuses",
+    "switch": "switches",
+    "relay": "relays",
+    "potentiometer": "potentiometers",
+    "header": "headers",
+    "mcu": "microcontrollers",
+    "adc": "adcs",
+    "dac": "dacs",
+}
+
+# Response fields that are metadata rather than parametrics — everything else
+# scalar in a list.json row is folded into key_parameters.
+_JLCSEARCH_LIST_BASE_KEYS = {
+    "lcsc", "mfr", "description", "stock", "price1", "in_stock",
+    "package", "attributes", "is_basic", "is_preferred",
+}
+
+
+def discover_lcsc_parametric(
+    role: str | None,
+    params: list[str],
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parametric discovery via jlcsearch typed category endpoints.
+
+    `params` are `key=value` pairs passed through verbatim as query params —
+    jlcsearch expects normalized SI values (e.g. resistance=1000, package=0402).
+    """
+    notes: list[str] = []
+    out: list[dict[str, Any]] = []
+    category = JLCSEARCH_LIST_OF_ROLE.get(str(role or "").strip().lower())
+    if not category:
+        notes.append(f"lcsc_parametric_skipped:no_endpoint_for_role:{role}")
+        return out, notes
+    query: dict[str, str] = {}
+    for pair in params or []:
+        key, _, val = str(pair).partition("=")
+        if key.strip() and val.strip():
+            query[key.strip()] = val.strip()
+    query["limit"] = str(max(1, int(limit)))
+    url = f"https://jlcsearch.tscircuit.com/{category}/list.json?" + urllib.parse.urlencode(query)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        notes.append(f"lcsc_parametric_failed:{category}:{type(exc).__name__}")
+        return out, notes
+    rows = data.get(category) if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        notes.append(f"lcsc_parametric_bad_shape:{category}")
+        return out, notes
+    for comp in rows:
+        if not isinstance(comp, dict):
+            continue
+        mpn = comp.get("mfr") or ""
+        if not mpn:
+            continue
+        package = comp.get("package") or ""
+        key_params = {
+            k: v
+            for k, v in comp.items()
+            if k not in _JLCSEARCH_LIST_BASE_KEYS
+            and isinstance(v, (str, int, float))
+            and v != ""
+        }
+        out.append(
+            {
+                "mpn": mpn,
+                "role": role,
+                "source": "lcsc_parametric",
+                "source_keyword": category,
+                "manufacturer": "",
+                "stock": comp.get("stock"),
+                "price": comp.get("price1"),
+                "currency": "CNY",
+                "lcsc_id": comp.get("lcsc"),
+                "package": package,
+                "package_hint": package,
+                "distributor_package": package,
+                "description": comp.get("description") or "",
+                "key_parameters": key_params,
+                "is_basic": comp.get("is_basic"),
+            }
+        )
     return out, notes
 
 
@@ -2109,6 +2256,7 @@ def buyable_gate(
     *,
     stock_threshold: int,
     fetched: bool,
+    min_local_sources: int = 2,
 ) -> dict[str, Any]:
     if not fetched:
         return {"status": "pending_web_data", "reason": "run_with_--fetch-web"}
@@ -2126,6 +2274,16 @@ def buyable_gate(
     if len(active) == 1:
         stock = active[0].get("stock") or 0
         if isinstance(stock, (int, float)) and stock >= stock_threshold:
+            # Single-source locales (gate_policy.min_local_sources: 1, e.g. an
+            # LCSC-only lane) treat one healthy source as a real pass — there
+            # is no second structured source to cross-check against.
+            if min_local_sources <= 1:
+                return {
+                    "status": "pass",
+                    "reason": "single_source_meets_locale_policy",
+                    "active_count": 1,
+                    "stock": stock,
+                }
             return {
                 "status": "warn_single_source",
                 "reason": "one_local_source_above_stock_threshold",
@@ -2306,7 +2464,7 @@ def collect_vendor_results(
                     "status": "skipped_after_pass",
                     "reason": "two_active_sources_already_found",
                     "fetched_at": now_iso(),
-                    "lane": LANE_OF_VENDOR.get(vendor_id, "unknown"),
+                    "lane": _lane_of(vendor_id, locale_block),
                 }
             )
             continue
@@ -2393,7 +2551,7 @@ def collect_vendor_results(
         # Tag the lane so downstream consumers can filter without knowing
         # the vendor_id whitelist. Always present, even on fetch_error /
         # skipped_after_pass, so the field is a stable contract.
-        res["lane"] = LANE_OF_VENDOR.get(vendor_id, "unknown")
+        res["lane"] = _lane_of(vendor_id, locale_block)
         results.append(res)
         if res.get("status") == "active":
             active_count += 1
@@ -2656,12 +2814,15 @@ def _extract_key_params(vendor_results: list[dict[str, Any]], role: str | None) 
     profile = role_profile(role)
     aliases = profile.get("parameter_aliases", {}) if profile else {}
 
-    # Find a vendor result with raw_parameters (DigiKey API)
+    # Find a vendor result with raw_parameters (DigiKey API, or LCSC when the
+    # locale opts into lcsc_attributes_as_parameters)
     raw_params: dict[str, str] = {}
+    raw_params_vendor = ""
     for v in vendor_results:
         rp = v.get("raw_parameters")
         if isinstance(rp, dict) and rp:
             raw_params = rp
+            raw_params_vendor = str(v.get("vendor_id") or "")
             break
     if not raw_params:
         return {}
@@ -2677,12 +2838,17 @@ def _extract_key_params(vendor_results: list[dict[str, Any]], role: str | None) 
 
     # Generic fallback: any param whose key contains a recognised keyword.
     # Cap at 16 entries to avoid bloating the JSON for parts with 60+ params.
+    # LCSC-sourced params get passive-term keywords on top — the DK-driven JP
+    # fallback output stays unchanged.
+    keywords = _GENERIC_PARAM_KEYWORDS
+    if raw_params_vendor == "lcsc":
+        keywords = keywords + ("resistance", "capacitance", "inductance", "impedance", "tolerance", "esr")
     generic: dict[str, str] = {}
     for k, val in raw_params.items():
         if not val:
             continue
         kl = str(k).lower()
-        if any(kw.lower() in kl for kw in _GENERIC_PARAM_KEYWORDS):
+        if any(kw.lower() in kl for kw in keywords):
             generic[str(k)] = str(val)
             if len(generic) >= 16:
                 break
@@ -2728,7 +2894,13 @@ def evaluate_candidate(
     stock_block = locale_block.get("stock_threshold", {}) or {}
     threshold_key = "long_term" if long_term_supply else "short_term"
     threshold = int(stock_block.get(threshold_key, 10))
-    buyable = buyable_gate(vendor_results, stock_threshold=threshold, fetched=fetch_web)
+    gate_policy = locale_block.get("gate_policy") or {}
+    buyable = buyable_gate(
+        vendor_results,
+        stock_threshold=threshold,
+        fetched=fetch_web,
+        min_local_sources=int(gate_policy.get("min_local_sources", 2)),
+    )
 
     # Speed: skip the library network probe (LCSC dry-run + UL session, ~5s)
     # whenever buyable already says fail. The final verdict will be fail
@@ -2748,6 +2920,15 @@ def evaluate_candidate(
             if not candidate.get("distributor_mounting"):
                 candidate["distributor_mounting"] = rp.get("Mounting Type") or rp.get("取り付けタイプ") or ""
             break
+    # Fallback: LCSC carries package as a plain field, not raw_parameters —
+    # without this, LCSC-only candidates hit solderability package_unknown.
+    if not candidate.get("package_hint"):
+        for v in vendor_results:
+            if v.get("package"):
+                candidate["package_hint"] = str(v["package"])
+                if not candidate.get("distributor_package"):
+                    candidate["distributor_package"] = candidate["package_hint"]
+                break
 
     # Reuse Phase 1 library probe if present (saves a redundant scan).
     # Phase 1 ran without vendor_results (because vendor calls hadn't happened
@@ -2790,8 +2971,9 @@ def evaluate_candidate(
     # co-order on LCSC". Purely informational — buyable_gate already counts
     # LCSC as buyable. User-facing output uses these flags to hint that an
     # LCSC-only winner means a 5-day DHL lane via JLCPCB.
+    local_ids = _local_vendor_ids(locale_block)
     local_jp_active = any(
-        v.get("status") == "active" and v.get("vendor_id") in JP_LOCAL_VENDOR_IDS
+        v.get("status") == "active" and v.get("vendor_id") in local_ids
         for v in vendor_results
     )
     lcsc_active = any(
@@ -2815,7 +2997,7 @@ def evaluate_candidate(
         if v.get("datasheet_url") and v.get("status") in ("active", "nrnd")
     }
 
-    return {
+    result = {
         "mpn": mpn,
         "expected_role": expected_role or candidate.get("role"),
         "locale": locale_name,
@@ -2843,6 +3025,17 @@ def evaluate_candidate(
             "instruction": "LLM may only block or request rerun; it must not override hard fail to pass.",
         },
     }
+    # JP-lane diagnostic flags only make sense where a "domestic vs LCSC
+    # co-order" distinction exists; single-lane locales suppress them.
+    display_cfg = locale_block.get("display") or {}
+    if str(display_cfg.get("emit_lane_flags", "jp")) != "jp":
+        del result["local_jp_active"]
+        del result["lcsc_only_active"]
+    # Locales without a lifecycle data source label every result honestly
+    # instead of pretending an NRND check happened.
+    if str(gate_policy.get("lifecycle_policy", "api")) == "unverified":
+        result["lifecycle"] = "unverified"
+    return result
 
 
 def add_price_tags(results: list[dict[str, Any]]) -> None:
@@ -2916,6 +3109,10 @@ def summary_lines(payload: dict[str, Any]) -> list[str]:
                 )
                 if v
             )
+            if not key_bits and params:
+                # Passive/parametric rows carry category-typed keys instead of
+                # the fixed power-IC quartet — show the first few generically.
+                key_bits = " ".join(f"{k}={v}" for k, v in list(params.items())[:3])
             lines.append(
                 f"{item.get('discover_rank')}. {item.get('mpn')} "
                 f"source={item.get('source')} stock={item.get('stock')} "
@@ -2926,6 +3123,12 @@ def summary_lines(payload: dict[str, Any]) -> list[str]:
             lines.append("notes=" + "; ".join(payload["source_notes"][:5]))
         if payload.get("output"):
             lines.append(f"json={payload['output']}")
+        # Discover output is a LONGLIST, not a verified pick — say so on the
+        # stream the LLM actually reads (next_command in JSON is not enough).
+        lines.append(
+            "next: discover 产物只是 longlist —— 跑 --longlist <json> --fetch-web "
+            "过 buyable/solderability 验证后才是选品结果"
+        )
         return lines
 
     return _render_evaluation_summary(payload)
@@ -2997,6 +3200,34 @@ def _compact_int(n: Any) -> str:
     return f"{n:,}"
 
 
+# Renderer fallback = today's JP literals. Locale yaml `display` blocks
+# override per key; any yaml failure falls back here so the JP summary can
+# never regress to a blank table.
+_JP_DISPLAY_DEFAULTS: dict[str, Any] = {
+    "lane_order": ["digikey_jp", "mouser_jp", "lcsc"],
+    "lane_labels": {
+        "digikey_jp": "🇯🇵 DK_JP (¥/在库)",
+        "mouser_jp": "🇯🇵 Mouser_JP",
+        "lcsc": "🇨🇳 LCSC (CNY ≈ JPY / 在库)",
+    },
+    "emit_lane_flags": "jp",
+    "lcsc_only_note": "⚠ {mpn}：本土仓未收录，仅 LCSC 有现货 — 走 JLCPCB 拼单（DHL ~5d 到日本）",
+    "footer_note": "注：购买 URL / datasheet / fail 候选完整数据 → JSON。LCSC lane 走 JLCPCB 拼单（PCB+元件同 DHL）。",
+}
+
+
+def _display_config(locale_label: str | None) -> dict[str, Any]:
+    cfg = dict(_JP_DISPLAY_DEFAULTS)
+    try:
+        mapping = load_yaml(LOCALE_MAPPING)
+        _, block = resolve_locale(locale_label, mapping)
+        for key, val in (block.get("display") or {}).items():
+            cfg[key] = val
+    except Exception:
+        pass
+    return cfg
+
+
 def _lane_cell(v: dict[str, Any] | None) -> str:
     """One markdown-table cell for a single lane. Hide all non-active states
     (no_match / fetch_error / skipped / pending) — user doesn't care which
@@ -3018,6 +3249,11 @@ def _lane_cell(v: dict[str, Any] | None) -> str:
             f"¥{price:.2f} CNY (≈¥{jpy_text} JPY, {_compact_int(stock)})"
             f"{nrnd_marker}{fx_warn}"
         )
+    if v.get("vendor_id") == "lcsc" and v.get("currency") == "CNY" and isinstance(price, (int, float)):
+        # fx_display: none locales — native CNY with adaptive decimals (generic
+        # ¥{:,.0f} would round ¥0.04 to ¥0; passives price in fractions of a fen).
+        cny_text = f"{price:.2f}" if price >= 0.1 else f"{price:.4f}"
+        return f"¥{cny_text} CNY ({_compact_int(stock)}){nrnd_marker}"
     p = f"¥{price:,.0f}" if isinstance(price, (int, float)) else "—"
     if isinstance(stock, (int, float)) and int(stock) == 0:
         return f"{p} (缺货){nrnd_marker}"
@@ -3095,15 +3331,20 @@ def _render_evaluation_summary(payload: dict[str, Any]) -> list[str]:
         if str(it.get("verdict") or "") != "fail"
     ][:12]
 
+    display_cfg = _display_config(payload.get("locale"))
+    lane_order = [str(x) for x in (display_cfg.get("lane_order") or _JP_DISPLAY_DEFAULTS["lane_order"])]
+    lane_labels = display_cfg.get("lane_labels") or {}
+
     if not visible:
         lines.append("✗ 没有任何候选通过 verdict —— 请回 longlist 重 spec 或考虑替代型号。")
         lines.append("（fail 候选完整数据见 JSON。）")
     else:
-        # Markdown table
+        # Markdown table — lane columns driven by locale display config
+        header_cells = [str(lane_labels.get(l, l)) for l in lane_order]
         lines.append(
-            "| # | MPN | 厂家 · spec · 封装 | 🇯🇵 DK_JP (¥/在库) | 🇯🇵 Mouser_JP | 🇨🇳 LCSC (CNY ≈ JPY / 在库) | lib |"
+            "| # | MPN | 厂家 · spec · 封装 | " + " | ".join(header_cells) + " | lib |"
         )
-        lines.append("|---|---|---|---|---|---|:-:|")
+        lines.append("|---|---|---|" + "---|" * len(lane_order) + ":-:|")
         for idx, item in enumerate(visible, 1):
             verdict = str(item.get("verdict") or "")
             warn = " ⚠" if verdict == "warn_single_source" else ""
@@ -3116,7 +3357,7 @@ def _render_evaluation_summary(payload: dict[str, Any]) -> list[str]:
             desc = " · ".join(b for b in (manufacturer, spec_str, package) if b)
 
             lane_cells = []
-            for lane_id in ("digikey_jp", "mouser_jp", "lcsc"):
+            for lane_id in lane_order:
                 v = next(
                     (vr for vr in item.get("vendor_results", []) or []
                      if vr.get("vendor_id") == lane_id),
@@ -3128,15 +3369,17 @@ def _render_evaluation_summary(payload: dict[str, Any]) -> list[str]:
             lib_glyph = _LIBRARY_GLYPH.get(lib_status, "·")
 
             lines.append(
-                f"| {idx} | {mpn} | {desc} | {lane_cells[0]} | {lane_cells[1]} | {lane_cells[2]} | {lib_glyph} |"
+                f"| {idx} | {mpn} | {desc} | " + " | ".join(lane_cells) + f" | {lib_glyph} |"
             )
 
         # Annotate any candidate with lcsc_only_active to clarify lane choice.
-        lcsc_only = [it.get("mpn") for it in visible if it.get("lcsc_only_active")]
-        if lcsc_only:
-            lines.append("")
-            for mpn in lcsc_only:
-                lines.append(f"⚠ {mpn}：本土仓未收录，仅 LCSC 有现货 — 走 JLCPCB 拼单（DHL ~5d 到日本）")
+        if str(display_cfg.get("emit_lane_flags", "jp")) == "jp":
+            lcsc_only = [it.get("mpn") for it in visible if it.get("lcsc_only_active")]
+            if lcsc_only:
+                lines.append("")
+                note_tmpl = str(display_cfg.get("lcsc_only_note") or _JP_DISPLAY_DEFAULTS["lcsc_only_note"])
+                for mpn in lcsc_only:
+                    lines.append(note_tmpl.format(mpn=mpn))
 
         # Derating annotations (advisory). Only surface non-ok states so the
         # table stays clean. `warn` = operating point exceeds the generic
@@ -3156,9 +3399,9 @@ def _render_evaluation_summary(payload: dict[str, Any]) -> list[str]:
             lines.extend("  " + dl for dl in derate_lines)
 
     lines.append("")
-    lines.append(
-        "注：购买 URL / datasheet / fail 候选完整数据 → JSON。LCSC lane 走 JLCPCB 拼单（PCB+元件同 DHL）。"
-    )
+    if display_cfg.get("lifecycle_note"):
+        lines.append(str(display_cfg["lifecycle_note"]))
+    lines.append(str(display_cfg.get("footer_note") or _JP_DISPLAY_DEFAULTS["footer_note"]))
     if payload.get("output"):
         lines.append(f"json: {payload['output']}")
     lines.append(
@@ -3172,6 +3415,7 @@ def run_evaluation(args: argparse.Namespace) -> int:
     mapping = load_yaml(LOCALE_MAPPING)
     locale_label = args.locale or read_user_locale(USER_MD)
     locale_name, locale_block = resolve_locale(locale_label, mapping)
+    _warn_caller_locale_mismatch(args, locale_name)
     if locale_name == "unknown" and not args.allow_unknown_locale:
         payload = {
             "status": "pending_user_input",
@@ -3194,7 +3438,7 @@ def run_evaluation(args: argparse.Namespace) -> int:
     longlist_warning: str | None = None
     if len(candidates) > LONGLIST_HARD_LIMIT:
         payload = {
-            "schema": "component-selecting-JP/v1",
+            "schema": f"{args.caller_skill}/v1",
             "status": "fail_too_many_candidates",
             "reason": (
                 f"longlist 有 {len(candidates)} 个候选，超过硬上限 {LONGLIST_HARD_LIMIT}。"
@@ -3308,7 +3552,7 @@ def run_evaluation(args: argparse.Namespace) -> int:
     add_price_tags(results)
     rank_results(results)
     payload = {
-        "schema": "component-selecting-JP/v1",
+        "schema": f"{args.caller_skill}/v1",
         "status": "complete",
         "locale": locale_name,
         "currency": locale_block.get("currency", "USD"),
@@ -3334,9 +3578,10 @@ def run_discover(args: argparse.Namespace) -> int:
     mapping = load_yaml(LOCALE_MAPPING)
     locale_label = args.locale or read_user_locale(USER_MD)
     locale_name, locale_block = resolve_locale(locale_label, mapping)
+    _warn_caller_locale_mismatch(args, locale_name)
     if locale_name == "unknown" and not args.allow_unknown_locale:
         payload = {
-            "schema": "component-selecting-JP/discover-v1",
+            "schema": f"{args.caller_skill}/discover-v1",
             "status": "pending_user_input",
             "reason": "USER.md §0 locale missing or unsupported",
             "evaluated_at": now_iso(),
@@ -3351,24 +3596,38 @@ def run_discover(args: argparse.Namespace) -> int:
         keywords = list(profile.get("keywords", []))
     if args.query:
         keywords.append(args.query)
-    if not keywords:
+
+    # `all` resolves to the locale's discover_sources so key-free locales
+    # never even attempt DigiKey; explicit --discover-source overrides.
+    if args.discover_source == "all":
+        sources = {
+            str(s) for s in (locale_block.get("discover_sources") or ["local", "digikey", "lcsc"])
+        }
+    else:
+        sources = {args.discover_source.replace("-", "_")}
+
+    # Keywords gate only keyword-consuming sources; parametric / shard lanes
+    # run off --param / role mapping and need none.
+    keyword_sources = sources & {"local", "digikey", "lcsc"}
+    if not keywords and keyword_sources == sources:
         payload = {
-            "schema": "component-selecting-JP/discover-v1",
+            "schema": f"{args.caller_skill}/discover-v1",
             "status": "pending_user_input",
             "reason": "discover requires --keywords, --query, or a known --role profile",
             "evaluated_at": now_iso(),
         }
         write_payload(payload, args)
         return 3
+    if not keywords:
+        sources = sources - keyword_sources
 
     notes: list[str] = []
     raw_rows: list[dict[str, Any]] = []
-    source = args.discover_source
-    if source in {"all", "local"}:
+    if "local" in sources:
         rows, source_notes = discover_local_history(role, keywords)
         raw_rows.extend(rows)
         notes.extend(source_notes)
-    if source in {"all", "digikey"}:
+    if "digikey" in sources:
         rows, source_notes = discover_digikey_api(
             keywords=keywords,
             role=role,
@@ -3377,8 +3636,27 @@ def run_discover(args: argparse.Namespace) -> int:
         )
         raw_rows.extend(rows)
         notes.extend(source_notes)
-    if source in {"all", "lcsc"}:
+    if "lcsc" in sources:
         rows, source_notes = discover_lcsc_api(keywords, role, args.discover_limit_per_keyword)
+        raw_rows.extend(rows)
+        notes.extend(source_notes)
+    if "lcsc_parametric" in sources:
+        rows, source_notes = discover_lcsc_parametric(role, args.param, args.discover_limit)
+        raw_rows.extend(rows)
+        notes.extend(source_notes)
+    if "jlcparts" in sources:
+        # Offline shard lane for categories jlcsearch lacks. Lazy import +
+        # blanket degrade: this lane must never break a discover run.
+        try:
+            import jlcparts_shard
+
+            rows, source_notes = jlcparts_shard.discover_rows(
+                role=role,
+                query=args.query,
+                limit=args.discover_limit,
+            )
+        except Exception as exc:
+            rows, source_notes = [], [f"jlcparts_failed:{type(exc).__name__}"]
         raw_rows.extend(rows)
         notes.extend(source_notes)
 
@@ -3440,7 +3718,7 @@ def run_discover(args: argparse.Namespace) -> int:
         row.pop("_drop_by_library", None)
 
     payload = {
-        "schema": "component-selecting-JP/discover-v1",
+        "schema": f"{args.caller_skill}/discover-v1",
         "status": "complete" if filtered else "no_candidates",
         "role": role,
         "locale": locale_name,
@@ -3467,7 +3745,7 @@ def run_discover(args: argparse.Namespace) -> int:
         "count": len(filtered),
         "evaluated_at": now_iso(),
         "next_command": (
-            "python3 .claude/skills/component-selecting-JP/scripts/"
+            f"python3 .claude/skills/{args.caller_skill}/scripts/"
             "component_select.py --longlist <this_json> "
             "--project-path Projects/<name> --expected-role <role> --fetch-web --summary"
         ),
@@ -3568,6 +3846,31 @@ def run_self_check() -> int:
         default_vendors = [v["vendor_id"] for v in build_vendor_urls("C0805C104K5RACTU", jp_block)]
         if default_vendors != ["digikey_jp", "mouser_jp", "lcsc"]:
             failures.append(f"default JP vendors not API-only core lanes: {default_vendors}")
+        # JP yaml keys must reproduce the engine defaults — catches yaml drift
+        # that would silently change JP behavior.
+        jp_gate = jp_block.get("gate_policy") or {}
+        if int(jp_gate.get("min_local_sources", 2)) != 2:
+            failures.append(f"JP gate_policy.min_local_sources drifted: {jp_gate}")
+        jp_display = jp_block.get("display") or {}
+        if [str(x) for x in jp_display.get("lane_order") or []] not in ([], ["digikey_jp", "mouser_jp", "lcsc"]):
+            failures.append(f"JP display.lane_order drifted: {jp_display.get('lane_order')}")
+        if str(jp_block.get("fx_display", "cny_jpy")) != "cny_jpy":
+            failures.append(f"JP fx_display drifted: {jp_block.get('fx_display')}")
+        # CN locale (component-selecting-CN thin shell) wiring
+        cn_name, cn_block = resolve_locale("中国大陆", mapping)
+        if cn_name != "中国大陆":
+            failures.append(f"CN locale unresolvable: {cn_name}")
+        else:
+            cn_vendors = [v["vendor_id"] for v in build_vendor_urls("0402WGF1001TCE", cn_block)]
+            if cn_vendors != ["lcsc"]:
+                failures.append(f"default CN vendors not [lcsc]: {cn_vendors}")
+            cn_gate = cn_block.get("gate_policy") or {}
+            if int(cn_gate.get("min_local_sources", 2)) != 1:
+                failures.append(f"CN gate_policy.min_local_sources != 1: {cn_gate}")
+            if str(cn_gate.get("lifecycle_policy", "api")) != "unverified":
+                failures.append(f"CN lifecycle_policy != unverified: {cn_gate}")
+            if str(cn_block.get("fx_display", "cny_jpy")) != "none":
+                failures.append(f"CN fx_display != none: {cn_block.get('fx_display')}")
 
     if failures:
         for failure in failures:
@@ -3593,6 +3896,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-role")
     parser.add_argument("--role", help="Discovery/evaluation role profile, e.g. isolated_dcdc, ldo, iso_amp")
     parser.add_argument("--locale")
+    parser.add_argument(
+        "--caller-skill",
+        default="component-selecting-JP",
+        help="skill identity for schema strings / next_command (thin locale "
+        "shells like component-selecting-CN pass their own name)",
+    )
     parser.add_argument("--allow-unknown-locale", action="store_true")
     parser.add_argument("--fetch-web", action="store_true")
     parser.add_argument("--web-driver", choices=["auto", "playwright", "urllib"], default="auto")
@@ -3633,7 +3942,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--query", help="Extra free-text discovery query")
     parser.add_argument("--keywords", action="append", default=[], help="Discovery keyword; repeatable")
-    parser.add_argument("--discover-source", choices=["all", "local", "digikey", "lcsc"], default="all")
+    parser.add_argument(
+        "--discover-source",
+        choices=["all", "local", "digikey", "lcsc", "lcsc-parametric", "jlcparts"],
+        default="all",
+    )
+    parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="parametric filter for --discover-source lcsc-parametric, "
+        "normalized SI values (e.g. --param resistance=1000 --param package=0402); repeatable",
+    )
     parser.add_argument("--discover-limit-per-keyword", type=int, default=30)
     parser.add_argument("--discover-limit", type=int, default=12)
     parser.add_argument("--vin")

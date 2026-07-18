@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 REQUIRED_KEYS = ("schema_version", "channel", "brand", "price_vs_stock", "blacklist_mpns")
-KNOWN_CHANNELS = ("jp_domestic_fast", "lcsc_jlcpcb", "auto_cheapest")
+KNOWN_CHANNELS = ("jp_domestic_fast", "cn_domestic_fast", "lcsc_jlcpcb", "auto_cheapest")
 
 
 def load_preferences(project_dir: Path) -> Optional[dict]:
@@ -43,5 +43,6 @@ def channel_to_recommended_path(channel: str) -> str:
     return {
         "lcsc_jlcpcb":      "lcsc",        # Path A: JLCPCB 拼单
         "jp_domestic_fast": "jp_domestic", # Path B/C-1/C-2: DK JP / Mouser JP
+        "cn_domestic_fast": "lcsc",        # CN locale: 立创直发（同一 LCSC 采购路径）
         "auto_cheapest":    "auto",        # 让 coverage_scan 算
     }.get(channel, "auto")
