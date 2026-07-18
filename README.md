@@ -13,6 +13,7 @@ PCB-Agent-Teams/
 ├── README.md             ← this file
 ├── CLAUDE.md             ← routing table (injected every session)
 ├── LICENSE.md            ← PolyForm Noncommercial 1.0.0
+├── THIRD_PARTY_NOTICES.md ← MIT notices for vendored/derived third-party code
 ├── USER.md.example       ← user-profile template (copy to USER.md)
 ├── USER.md               ← your profile: hardware on hand / locale / skills / preferences (gitignored)
 ├── requirements.txt      ← Python dependencies
@@ -250,3 +251,5 @@ If this project helps you, consider starring / supporting those upstream project
 
 Source-available under the **[PolyForm Noncommercial License 1.0.0](LICENSE.md)**.
 Free to use, modify, and share for **noncommercial** purposes (personal, research, education). **Commercial use requires a separate license** — contact the author. © 2026 zhang zheng.
+
+Third-party components (kicad-happy-derived analyzers, vendored KiCadRoutingTools) remain under their original MIT licenses — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
