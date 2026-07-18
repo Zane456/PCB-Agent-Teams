@@ -150,6 +150,8 @@ Details in [`component-preparing/references/bom_lifecycle.md`](.claude/skills/co
 
 ## First-time setup
 
+> **⚠ Not in Japan?** Phase 2 (component selection) is the only locale-bound stage: the shipped skill is `component-selecting-JP`, which prices in JPY against DigiKey JP / Mouser JP / LCSC-ships-to-Japan stock, and applies Japan-specific sourcing rules. Every other phase is locale-neutral and runs unchanged. To use this workspace outside Japan, set your locale in `USER.md §0`, then either **(a)** adapt `component-selecting-JP` into a variant for your region — swap the distributor endpoints / currency and the JP-specific rules in its `references/` — or **(b)** pick parts by hand and feed the list to `component-preparing`. The pipeline deliberately never falls back to the JP skill silently.
+
 ### Prerequisites
 
 - **macOS** with **[KiCad 10](https://www.kicad.org/download/)** installed — skills call `kicad-cli` and KiCad's bundled `pcbnew` Python API (no MCP). Default install is `/Applications/KiCad/KiCad.app`; if KiCad lives elsewhere, just make sure `kicad-cli` is on `PATH` (scripts auto-probe PATH / Homebrew / Snap / Flatpak). (`KICAD_ROOT` is unrelated — it overrides the *project workspace root*, not the KiCad install location.)
@@ -222,6 +224,24 @@ All keys go in `.env` (copied from `.env.example`). DigiKey is the only hard req
 | See cross-project electrical invariants | `.claude/skills/circuit-design/references/electrical_invariants.md` |
 | See shared library naming conventions | [lib_external/CONVENTIONS.md](lib_external/CONVENTIONS.md) |
 | See workspace meta-protocols (plan-first / sub-agent split / monitoring) | `.claude/references/protocols.md` |
+
+---
+
+## Acknowledgments
+
+This workspace stands on excellent open-source work. Sincere thanks to these projects and their maintainers:
+
+- **[KiCad](https://www.kicad.org/)** — the EDA foundation of the entire pipeline. Every schematic, board, ERC/DRC check, render, and Gerber goes through `kicad-cli` and the `pcbnew` Python API, on top of the official KiCad symbol / footprint / 3D libraries.
+- **[ngspice](https://ngspice.sourceforge.io/)** — powers every SPICE check: subcircuit simulation in `check-schematic` and parasitic re-simulation in `check-pcb`.
+- **[circuit-synth](https://github.com/circuit-synth/circuit-synth)** — Python-source-driven `.kicad_sch` generation, the engine of `draw-schematic`.
+- **[kicad-sch-api](https://github.com/circuit-synth/kicad-sch-api)** — programmatic schematic editing (MPN property injection, post-processing).
+- **[easyeda2kicad](https://github.com/uPesy/easyeda2kicad.py)** — converts LCSC / EasyEDA parts into KiCad symbols / footprints / 3D models for `component-preparing`.
+- **[KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools)** by drandyhaas — the optional auto-routing phase, including its Rust grid router (MIT, vendored under `.claude/skills/draw-pcb/scripts/vendor/`).
+- **[jlcsearch](https://github.com/tscircuit/jlcsearch)** by tscircuit — the public LCSC search API used as the third sourcing channel.
+- **[Playwright](https://playwright.dev/)** — headless-browser probing of distributor pages and datasheet fetching.
+- And the Python ecosystem this runs on: NumPy, SciPy, Shapely, Matplotlib, Pillow, ReportLab, odfpy, python-docx, Jinja2, Requests, PyYAML, psutil, pytest.
+
+If this project helps you, consider starring / supporting those upstream projects too.
 
 ---
 
