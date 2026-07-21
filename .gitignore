@@ -59,6 +59,7 @@ docs/
 
 # Claude Code is the only supported agent entrypoint in this workspace.
 # Keep accidental Codex / Antigravity scaffolding out of the project.
+# Porting to another agent is a fork-level change — see README.md §Using another agent.
 AGENTS.md
 .agents/
 .Codex/

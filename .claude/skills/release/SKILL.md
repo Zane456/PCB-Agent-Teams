@@ -1,6 +1,7 @@
 ---
 name: release
-description: Release / fab-package aggregator expert (Phase 5). ALWAYS invoke
+description: >-
+  Release / fab-package aggregator expert (Phase 5). ALWAYS invoke
   this skill after check-pcb gate passes when the user wants to package a
   board for fab/distributors: Gerber/Drill/CPL export, production BOM,
   document PDFs (HDD / CE / Design Review / ICD / Manufacturing), vendor

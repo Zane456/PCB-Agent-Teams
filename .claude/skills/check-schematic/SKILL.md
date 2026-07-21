@@ -1,6 +1,7 @@
 ---
 name: check-schematic
-description: Schematic review gate (Phase 3.5) — sch-only deep check expert.
+description: >-
+  Schematic review gate (Phase 3.5) — sch-only deep check expert.
   ALWAYS invoke this skill when auditing an existing .kicad_sch, running
   ERC triage, sch analyzer (structure + signal detection + rule IDs),
   subcircuit SPICE simulation (regulator/divider/RC/LC/opamp/crystal), or

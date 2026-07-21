@@ -1,6 +1,7 @@
 ---
 name: check-pcb
-description: PCB review and cross-domain check expert (Phase 4.5). ALWAYS
+description: >-
+  PCB review and cross-domain check expert (Phase 4.5). ALWAYS
   invoke this skill when reviewing an existing .kicad_pcb, running DRC,
   EMC pre-compliance, thermal hotspot, sch↔pcb cross-reference, parasitic
   SPICE, gerber audit, or judging fab-readiness. Do not declare a PCB
