@@ -1,6 +1,7 @@
 ---
 name: project-init
-description: Phase 0 PCB project skeleton expert. ALWAYS invoke this skill
+description: >-
+  Phase 0 PCB project skeleton expert. ALWAYS invoke this skill
   when the user wants to create / init / scaffold a new PCB project and
   Projects/<name>/ does not yet exist. Do not create project directories
   or project-level CLAUDE.md by hand. Use this skill first. Generates 5

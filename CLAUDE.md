@@ -2,6 +2,11 @@
 
 > 纯路由文件。**不承担 domain 知识 / 工程铁律**——那些归 SKILL.md 或项目 CLAUDE.md。
 
+## FIRST-RUN GATE
+
+`USER.md` 缺失 = 新 clone 未配置 → 先跑 `setup` skill，**别开工**（不 init / 不选品 / 不画图）。
+`USER.md` 存在 → 忽略本节，正常路由。（no USER.md → run `setup` first; otherwise ignore this section.）
+
 ## 目录速览
 
 ```text
@@ -15,7 +20,7 @@ PCB-Agent-Teams/
 ├── .claude/
 │   ├── references/       ← 工作区级元协议（按需读）
 │   │   └── protocols.md  ← USER 维护 / 计划先行 / sub-agent 分工 / 监控 / Phase 编号
-│   └── skills/           ← 10 个正式 skill
+│   └── skills/           ← 10 个正式 skill + `setup`（首次配置引导，配完自动失效）
 └── Projects/<name>/      ← 项目骨架（用 project-init 生成）
 ```
 
@@ -34,6 +39,12 @@ PCB-Agent-Teams/
 | 项目 **live 进度** / artifact 索引 / change log / 回退记录 | `Projects/<name>/STATUS.md` |
 | 项目骨架模板（CLAUDE.md 9 章节 + STATUS.md dashboard） | `.claude/skills/project-init/templates/` |
 | 共享库写入规则 | `lib_external/CONVENTIONS.md` |
+
+## 运行环境：只认 Claude Code
+
+skill 全部在 `.claude/skills/<name>/SKILL.md`，靠 Claude Code 自动发现 + `/<name>` 调用；本文件也靠
+Claude Code 自动加载。**没有为其它 agent 做任何适配**——换 agent 需要改的机制见 `README.md` §Using
+another agent。可用 skill = 下表 + 非 phase 的 `setup`（见上面 first-run gate），别自己编。
 
 ## 阶段 × skill 一表（核心路由）
 
@@ -95,6 +106,7 @@ PCB-Agent-Teams/
 ## 红线
 
 - ❌ 不要在工作区 CLAUDE.md 写**项目专属**或 **domain 铁律**——分别归项目 CLAUDE.md / SKILL.md
+- ❌ SKILL.md frontmatter 的 `description:` 不要裸写：值里含 `: `（如 `Triggers: 画 PCB`）会让严格 YAML 解析失败，Claude Code 不报错、静默退化成拿目录名当摘要 → **该 skill 自动触发失效**。一律用折叠块标量 `description: >-` 加两空格缩进
 - ❌ 不要把 `.env` key 写进 git
 - ❌ 不要凭记忆猜 MPN / footprint / pin
 - ❌ 不要把 `draw-pcb` 当一键流水线——摆件 / 旋转 / 铺铜要靠电路判断（brief + render），每一步交付前都该人工 review；Phase E 自动布线也是可选项，用户随时可改用 KiCad GUI 手布

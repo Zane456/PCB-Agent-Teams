@@ -1,6 +1,7 @@
 ---
 name: component-selecting-JP
-description: Component selecting expert (JP-only, deterministic API-only
+description: >-
+  Component selecting expert (JP-only, deterministic API-only
   buyable gate). ALWAYS invoke this skill when picking ANY component for a
   JP-locale project — ICs, modules, connectors, isolated parts, AND generic
   passives (resistor / capacitor / inductor / ferrite_bead); turning a

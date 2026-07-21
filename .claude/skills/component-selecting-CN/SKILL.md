@@ -1,6 +1,7 @@
 ---
 name: component-selecting-CN
-description: Component selecting expert for China-mainland (CN) locale
+description: >-
+  Component selecting expert for China-mainland (CN) locale
   projects ONLY — JP locale → component-selecting-JP, do not reuse this
   path. Zero API keys, deterministic API-only buyable gate. ALWAYS invoke
   this skill when picking ANY component for a CN-locale project — ICs,

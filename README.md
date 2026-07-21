@@ -2,7 +2,9 @@
 
 > A multi-project PCB design workspace orchestrated around KiCad 10. Ten skills drive a Phase 0–5 pipeline that covers the full chain, from topology discussion to Gerber shipout.
 
-> **Recommended runtime — [Claude Code](https://claude.com/claude-code).** This workspace is driven by `CLAUDE.md` (a routing table Claude Code auto-loads every session) plus a team of ten skills under `.claude/skills/`. Both are Claude Code-native formats, so it discovers and orchestrates the agent team with zero config — `CLAUDE.md` routes each phase to the right skill. The skills follow the open `SKILL.md` standard, so other agents can read them too, but the automatic `CLAUDE.md` load and `.claude/skills/` discovery are what make Claude Code the natural driver.
+> **Runtime — [Claude Code](https://claude.com/claude-code) only.** This workspace targets Claude Code and nothing else. It is driven by [`CLAUDE.md`](CLAUDE.md) (a routing table Claude Code auto-loads every session) plus a team of ten skills under `.claude/skills/`, which Claude Code discovers on its own. Both are Claude Code-native conventions, so it runs with zero config — and no other agent is set up here. The skills are plain `SKILL.md` files, so porting is possible; see [Using another agent](#using-another-agent) for exactly what has to change.
+>
+> **Just cloned this?** Open the folder in Claude Code and run `/setup`. It asks one short question, then walks you through locale, toolchain and your profile in your own language. It stops firing once `USER.md` exists.
 
 ---
 
@@ -11,14 +13,14 @@
 ```text
 PCB-Agent-Teams/
 ├── README.md             ← this file
-├── CLAUDE.md             ← routing table (injected every session)
+├── CLAUDE.md             ← routing table (auto-loaded by Claude Code every session)
 ├── LICENSE.md            ← PolyForm Noncommercial 1.0.0
 ├── THIRD_PARTY_NOTICES.md ← MIT notices for vendored/derived third-party code
 ├── USER.md.example       ← user-profile template (copy to USER.md)
 ├── USER.md               ← your profile: hardware on hand / locale / skills / preferences (gitignored)
 ├── requirements.txt      ← Python dependencies
 ├── .claude/
-│   ├── skills/           ← 10 skills
+│   ├── skills/           ← 10 skills + `setup` (first-run guide)
 │   └── references/       ← workspace meta-protocols (protocols.md)
 ├── lib_external/         ← shared component library (starts empty; component-preparing vendors symbols/footprints/3D here)
 ├── lib_cache/sources/    ← read-only cache of external libs (pre-filter pool)
@@ -104,6 +106,8 @@ Each skill is a standalone toolbox, **not a mandatory pipeline**. At any stage y
 
 Any gate that fails: **roll back**, do not bypass. See the detailed Phase table in [CLAUDE.md](CLAUDE.md).
 
+> Plus one non-pipeline skill: **`setup`** — the first-run guide. It is gated on `USER.md` being absent, so it runs once on a fresh clone and never again.
+
 ---
 
 ## Typical flow
@@ -151,6 +155,11 @@ Details in [`component-preparing/references/bom_lifecycle.md`](.claude/skills/co
 
 ## First-time setup
 
+> **Guided path (recommended).** Open the folder in Claude Code and run **`/setup`**.
+> It asks one short question, then handles the rest below in your own language — locale routing, toolchain
+> check, `USER.md`, and keys only if your locale needs them. It is gated on `USER.md` being absent, so it
+> runs on a fresh clone and never again. The manual steps below are the same thing, by hand.
+
 > **⚠ Not in Japan?** Phase 2 (component selection) is the only locale-bound stage; every other phase is locale-neutral and runs unchanged. Set your locale in `USER.md §0`:
 > - **China mainland** — supported out of the box via `component-selecting-CN`: LCSC jlcsearch + jlcparts data shards, **no API keys at all** (lifecycle is honestly labeled `unverified` since LCSC carries no NRND data).
 > - **Japan** — the original `component-selecting-JP` (DigiKey JP + Mouser JP + LCSC; needs a free DigiKey key).
@@ -183,14 +192,15 @@ cp .env.example .env
 # 3. Create your user profile
 cp USER.md.example USER.md
 #    then edit USER.md: §0 locale drives which component-selecting skill runs
-#    (defaults to Japan — the only locale implemented today). Fill the [待填]
-#    fields as they come up; skills read this before recommending any part, so
-#    they never suggest hardware you cannot test or a package you cannot solder.
+#    (template defaults to Japan; mainland China is also implemented). Fill the
+#    [待填] fields as they come up; skills read this before recommending any part,
+#    so they never suggest hardware you cannot test or a package you cannot solder.
 ```
 
 ### Run
 
-- **Claude Code**: open this folder — the root `CLAUDE.md` loads automatically, and the ten skills under `.claude/skills/` are available via `/<skill-name>`.
+- **Claude Code**: open this folder — the root `CLAUDE.md` loads automatically, and the skills under `.claude/skills/` are available via `/<skill-name>`. On a fresh clone, start with `/setup`.
+- **Another agent**: not set up here. See [Using another agent](#using-another-agent).
 - **Plain shell**: load the keys first with `set -a && source .env && set +a`, then run any skill script as `.venv/bin/python .claude/skills/<skill>/scripts/<script>.py`.
 
 ### Notes
@@ -198,6 +208,49 @@ cp USER.md.example USER.md
 - `.env` (your real keys) and `.venv/` are gitignored and are never committed — keep your keys out of git.
 - `Projects/` ships empty; `project-init` scaffolds a new board directory there on first run.
 - Shared library naming conventions: [`lib_external/CONVENTIONS.md`](lib_external/CONVENTIONS.md).
+
+---
+
+## Using another agent
+
+**This repo ships Claude Code-only.** Nothing here is wired for Codex, Copilot, Cursor or Gemini, and none
+of it is tested on them. Porting is possible — the file formats are open standards — but it is a change
+*you* make in your fork, not something the repo does for you. Two things are Claude Code conventions and
+both have to be re-pointed:
+
+**1. The instruction file.** Claude Code auto-loads `CLAUDE.md` at the repo root; that file is the routing
+table this whole workspace runs on. Almost every other agent reads `AGENTS.md` instead. Fix it either way:
+
+```bash
+ln -s CLAUDE.md AGENTS.md        # symlink, one file, stays in sync
+# or, if your agent dislikes symlinks, an AGENTS.md containing just: @CLAUDE.md
+```
+
+**2. The skills directory.** The `SKILL.md` *format* is a portable open standard; the *directory* is not —
+each agent scans only its own path and ignores the others.
+
+| Agent | Instruction file | Skills directory | Invocation |
+| --- | --- | --- | --- |
+| Claude Code | `CLAUDE.md` | `.claude/skills/` | `/<name>` |
+| Codex | `AGENTS.md` | `.agents/skills/` | `$<name>` |
+| GitHub Copilot | `.github/copilot-instructions.md` | `.github/skills/` | — |
+| Gemini CLI | `GEMINI.md` | `.gemini/skills/` | — |
+
+So expose the same folder under the name your agent scans — one symlink, no duplication, and new skills are
+picked up automatically:
+
+```bash
+mkdir -p .agents && ln -s ../.claude/skills .agents/skills   # Codex; adjust path per the table
+```
+
+Note `.gitignore` deliberately excludes `AGENTS.md` and `.agents/` to keep foreign scaffolding out of the
+upstream repo — drop those two lines in your fork or the symlinks will not be committed.
+
+**What to expect.** Skill *discovery* ports cleanly: with the symlink above, Codex lists all eleven skills.
+Skill *execution* is a different question and is **untested** — the skills shell out to `kicad-cli`, the
+project venv and distributor REST APIs, and agents differ in how they sandbox commands and network access.
+Also note the pipeline itself is macOS-only (KiCad paths), and symlinks need Developer Mode on Windows.
+Treat a port as your own experiment; issues filed against non-Claude-Code runtimes will be closed.
 
 ---
 
@@ -223,6 +276,7 @@ All keys go in `.env` (copied from `.env.example`). For the JP locale, DigiKey i
 
 | I want to… | Go to |
 | --- | --- |
+| Set up a fresh clone | run `/setup` in Claude Code, or [`.claude/skills/setup/SKILL.md`](.claude/skills/setup/SKILL.md) |
 | Understand the overall routing | [CLAUDE.md](CLAUDE.md) |
 | Learn a specific skill | `.claude/skills/<skill>/SKILL.md` |
 | See cross-project electrical invariants | `.claude/skills/circuit-design/references/electrical_invariants.md` |

@@ -1,6 +1,7 @@
 ---
 name: draw-schematic
-description: KiCad schematic generation pipeline expert (Phase 3). ALWAYS
+description: >-
+  KiCad schematic generation pipeline expert (Phase 3). ALWAYS
   invoke this skill when generating or regenerating .kicad_sch from a
   frozen BOM + topology, or rendering schematic PDF (画原理图 / 重新生成 sch /
   生成 PDF / regenerate after BOM change). Do not write .kicad_sch by string

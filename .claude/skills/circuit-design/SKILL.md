@@ -1,6 +1,7 @@
 ---
 name: circuit-design
-description: Phase 1 circuit topology and anchor-component discussion expert.
+description: >-
+  Phase 1 circuit topology and anchor-component discussion expert.
   ALWAYS invoke this skill when the user wants to discuss circuit structure,
   pick a topology, choose anchor parts, or extend a project with a new
   subcircuit (project must already exist; if not, project-init first).

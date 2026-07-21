@@ -13,7 +13,7 @@
 
 | 项 | 值 | 影响 |
 |---|---|---|
-| **所属地（高优先级因子）** | **日本** | 决定 `component-selecting-<locale>` 路由。已实现：`日本`（component-selecting-JP，需免费 DigiKey key）/ `中国大陆`（component-selecting-CN，零 key）；其他地区先读工作区 CLAUDE.md §"Locale 路由" |
+| **所属地（高优先级因子）** | `[待填]` | 决定 `component-selecting-<locale>` 路由。**必须自己填，没有默认值**——留空时选品不会静默 fallback 到任何国家。已实现：`日本`（component-selecting-JP，需免费 DigiKey key）/ `中国大陆`（component-selecting-CN，零 key）；其他地区先读工作区 CLAUDE.md §"Locale 路由" |
 | 学术身份 | `[待填]` | 实验室设备配置、安全规程、采购流程 |
 | 时区 | `[待填]`（如 JST (UTC+9)） | 邮件 / 会议讨论时间 |
 | 沟通语言 | `[待填]` | 见 §5 |

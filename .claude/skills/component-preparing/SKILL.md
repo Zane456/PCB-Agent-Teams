@@ -1,6 +1,7 @@
 ---
 name: component-preparing
-description: Phase 2.5 expert — applicability review + shortlist
+description: >-
+  Phase 2.5 expert — applicability review + shortlist
   confirmation + asset acquisition + BOM gate. ALWAYS invoke this skill
   after component-selecting outputs shortlist JSON: deep-review each top
   pick datasheet against the circuit role (5-dimension check) before user
